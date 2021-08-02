@@ -4,7 +4,7 @@ const domainSchema = mongoose.Schema({
 		type: String,
 		required: true
 	},
-	pretender: {
+	pretenders: {
 		type: [String]
 	}
 });
