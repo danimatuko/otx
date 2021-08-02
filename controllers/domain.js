@@ -1,14 +1,6 @@
 const express = require("express");
-const app = express();
-const port = 5000;
-const axios = require("axios");
-app.use(express.json());
-const connectToDB = require("./db/connect");
-const Domain = require("./models/Domain");
-const dotenv = require("dotenv");
-dotenv.config();
-
-connectToDB();
+const router = express.Router();
+const mongoose = require("mongoose");
 
 const save = async (domain) => {
 	try {
@@ -24,52 +16,30 @@ const save = async (domain) => {
 	}
 };
 
-const fetchData = (url) => {
-    
-};
-
-app.post("/check", async (req, res) => {
+const saveOne = async (req, res) => {
+	console.log("saveone");
 	const url = req.body.url;
-	let hasMoreResults;
 	try {
 		const domainExist = await Domain.findOne({ name: url });
 		if (domainExist) return res.send("domain already exist");
-		let page = 1;
-		const pretenders = [];
-		let domain = new Domain({
-			name: "",
-			pretenders: []
+
+		const { data } = await axios.get(
+			`https://otx.alienvault.com/otxapi/indicators/?type=domain&include_inactive=0&sort=-modified&q=${url}&page=1&limit=10`
+		);
+
+		/* SAVE DOMAIN TO DB */
+		const saveDomain = await Domain.create({
+			name: data.next.split("q=")[1].substring(0, data.next.split("q=")[1].indexOf("&")),
+			pretenders: data.results.map((ind) => ind.indicator)
 		});
 
-		do {
-			const { data } = await axios.get(
-				`https://otx.alienvault.com/otxapi/indicators/?type=domain&include_inactive=0&sort=-modified&q=${url}&page=${page}&limit=10`
-			);
-			// add name
-			if (data.previous == null) {
-				domain.name = data.next
-					.split("q=")[1]
-					.substring(0, data.next.split("q=")[1].indexOf("&"));
-			}
-
-			page++;
-			hasMoreResults = data.next;
-			console.log(hasMoreResults);
-			pretenders.push(...data.results.map((ind) => ind.indicator));
-		} while (hasMoreResults !== null);
-		// add pretenders
-		domain.pretenders = pretenders;
-
-		//save to DB
-		domain = await domain.save(domain);
-
-		res.status(201).json(domain);
+		res.status(201).json(saveDomain);
 	} catch (error) {
 		res.json(error);
 	}
-});
+};
 
-app.post("/check-multiple", async (req, res) => {
+const saveMany = async (req, res) => {
 	const urls = req.body.urls;
 
 	try {
@@ -102,18 +72,18 @@ app.post("/check-multiple", async (req, res) => {
 	} catch (error) {
 		res.json(error);
 	}
-});
+};
 
-app.delete(`/delete`, async (req, res) => {
+const deleteOne = async (req, res) => {
 	try {
 		await Domain.deleteMany({});
 		res.status(200).json({ message: "all domains removed" });
 	} catch (error) {
 		res.status(500).send(error.message);
 	}
-});
+};
 
-app.delete(`/delete/:id`, async (req, res) => {
+const deleteAll = async (req, res) => {
 	try {
 		const domain = await Domain.findById(req.params.id);
 		if (domain) {
@@ -125,8 +95,11 @@ app.delete(`/delete/:id`, async (req, res) => {
 	} catch (error) {
 		res.status(500).send(error.message);
 	}
-});
+};
 
-app.listen(port, () => {
-	console.log(`app listening at http://localhost:${port}`);
-});
+module.exports = {
+	saveOne,
+	saveMany,
+	deleteOne,
+	deleteAll
+};
