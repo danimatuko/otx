@@ -13,7 +13,7 @@ connectToDB();
 const save = async (domain) => {
 	try {
 		const domainExist = Domain.findOne({ name: domain.name });
-		if (domainExist) console.log("domain already exist");
+		if (domainExist) throw new Error("domain already exist");
 
 		await Domain.create({
 			name: domain.name,
@@ -24,44 +24,51 @@ const save = async (domain) => {
 	}
 };
 
-const fetchData = (url) => {
-    
+const fetchData = async (url) => {
+	let page = 1;
+	let hasMoreResults;
+
+	const pretenders = [];
+	let domain = {
+		name: "",
+		pretenders: []
+	};
+
+	do {
+		const { data } = await axios.get(
+			`https://otx.alienvault.com/otxapi/indicators/?type=domain&include_inactive=0&sort=-modified&q=${url}&page=${page}&limit=10`
+		);
+		// add name
+		if (data.previous == null) {
+			domain.name = data.next
+				.split("q=")[1]
+				.substring(0, data.next.split("q=")[1].indexOf("&"));
+		}
+
+		page++;
+		hasMoreResults = data.next;
+		!hasMoreResults
+			? console.log(`Done fetching for" + ${domain.name}!`)
+			: console.log(`[${domain.name}] ${data.next}`);
+		pretenders.push(...data.results.map((ind) => ind.indicator));
+	} while (hasMoreResults !== null);
+	domain.pretenders = pretenders;
+
+	return domain;
 };
 
 app.post("/check", async (req, res) => {
 	const url = req.body.url;
-	let hasMoreResults;
+	// let hasMoreResults;
 	try {
 		const domainExist = await Domain.findOne({ name: url });
 		if (domainExist) return res.send("domain already exist");
-		let page = 1;
-		const pretenders = [];
-		let domain = new Domain({
-			name: "",
-			pretenders: []
-		});
 
-		do {
-			const { data } = await axios.get(
-				`https://otx.alienvault.com/otxapi/indicators/?type=domain&include_inactive=0&sort=-modified&q=${url}&page=${page}&limit=10`
-			);
-			// add name
-			if (data.previous == null) {
-				domain.name = data.next
-					.split("q=")[1]
-					.substring(0, data.next.split("q=")[1].indexOf("&"));
-			}
-
-			page++;
-			hasMoreResults = data.next;
-			console.log(hasMoreResults);
-			pretenders.push(...data.results.map((ind) => ind.indicator));
-		} while (hasMoreResults !== null);
-		// add pretenders
-		domain.pretenders = pretenders;
-
+		domain = await fetchData(url);
+		console.log("after fetch", domain);
 		//save to DB
-		domain = await domain.save(domain);
+		await save(domain);
+		console.log("after save1", domain);
 
 		res.status(201).json(domain);
 	} catch (error) {
@@ -75,30 +82,16 @@ app.post("/check-multiple", async (req, res) => {
 	try {
 		const promisesArr = [];
 		urls.forEach((url) => {
-			promisesArr.push(
-				axios.get(
-					`https://otx.alienvault.com/otxapi/indicators/?type=domain&include_inactive=0&sort=-modified&q=${url}&page=1&limit=10`
-				)
-			);
+			promisesArr.push(fetchData(url));
 		});
 
 		let results = await Promise.all(promisesArr);
 
-		const arr = [];
-		results.forEach((result) => {
-			arr.push({
-				name: result.data.next
-					.split("q=")[1]
-					.substring(0, result.data.next.split("q=")[1].indexOf("&")),
-				pretenders: result.data.results.map((ind) => ind.indicator)
-			});
-		});
-
-		arr.forEach((domain) => {
+		results.forEach((domain) => {
 			save(domain);
 		});
 
-		res.status(201).json(arr);
+		res.status(201).json(results);
 	} catch (error) {
 		res.json(error);
 	}
